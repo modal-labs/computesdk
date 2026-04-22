@@ -13,7 +13,7 @@ import { defineProvider, escapeShellArg } from '@computesdk/provider';
 import type { Runtime, CodeResult, CommandResult, SandboxInfo, CreateSandboxOptions, FileEntry, RunCommandOptions } from '@computesdk/provider';
 
 // Import Modal SDK
-import { App, Sandbox, initializeClient } from 'modal';
+import { ModalClient } from 'modal';
 
 /**
  * Modal-specific configuration options
@@ -39,6 +39,8 @@ export interface ModalConfig {
 interface ModalSandbox {
   sandbox: any; // Modal Sandbox instance (using any due to alpha SDK)
   sandboxId: string;
+  client: any; // ModalClient instance - carried through so instance methods use the same credentials/environment
+  app: any;    // Modal App instance
 }
 
 /**
@@ -93,14 +95,13 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
         }
 
         try {
-          // Initialize Modal client with credentials
-          initializeClient({ tokenId, tokenSecret });
+          const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
 
           let sandbox: any;
           let sandboxId: string;
 
           // Create new Modal sandbox
-          const app = await App.lookup('computesdk-modal', { createIfMissing: true });
+          const app = await client.apps.fromName('computesdk-modal', { createIfMissing: true });
 
             // Destructure known ComputeSDK fields, collect the rest for passthrough
             const {
@@ -126,15 +127,14 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
             if (sourceId) {
               // Create from snapshot/template
               try {
-                const snapshot = await (Sandbox as any).fromSnapshot(sourceId);
-                image = snapshot;
+                image = await client.images.fromId(sourceId);
               } catch (e) {
                 // Fallback: try to treat it as a registry image
-                image = await app.imageFromRegistry(sourceId); 
+                image = client.images.fromRegistry(sourceId);
               }
             } else {
               // Default to Node.js (more appropriate for a Node.js SDK)
-              image = await app.imageFromRegistry('node:20');
+              image = client.images.fromRegistry('node:20');
             }
             
             // Configure sandbox options
@@ -166,12 +166,14 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
               sandboxOptions.name = name;
             }
             
-          sandbox = await app.createSandbox(image, sandboxOptions);
+          sandbox = await client.sandboxes.create(app, image, sandboxOptions);
           sandboxId = sandbox.sandboxId;
 
           const modalSandbox: ModalSandbox = {
             sandbox,
-            sandboxId
+            sandboxId,
+            client,
+            app,
           };
 
           return {
@@ -198,16 +200,16 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
       },
 
       getById: async (config: ModalConfig, sandboxId: string) => {
-        const tokenId = config.tokenId || process.env.MODAL_TOKEN_ID!;
-        const tokenSecret = config.tokenSecret || process.env.MODAL_TOKEN_SECRET!;
-
         try {
-          initializeClient({ tokenId, tokenSecret });
-          const sandbox = await Sandbox.fromId(sandboxId);
+          const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment });
+          const sandbox = await client.sandboxes.fromId(sandboxId);
+          const app = await client.apps.fromName('computesdk-modal', { createIfMissing: true });
 
           const modalSandbox: ModalSandbox = {
             sandbox,
-            sandboxId
+            sandboxId,
+            client,
+            app,
           };
 
           return {
@@ -226,9 +228,10 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
         );
       },
 
-      destroy: async (_config: ModalConfig, sandboxId: string) => {
+      destroy: async (config: ModalConfig, sandboxId: string) => {
         try {
-          const sandbox = await Sandbox.fromId(sandboxId);
+          const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment });
+          const sandbox = await client.sandboxes.fromId(sandboxId);
           if (sandbox && typeof sandbox.terminate === 'function') {
             await sandbox.terminate();
           }
@@ -256,9 +259,8 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
             command = ['node', '-e', code];
           } else {
             // For Python execution, create a Python sandbox dynamically
-            const app = await App.lookup('computesdk-modal', { createIfMissing: true });
-            const pythonImage = await app.imageFromRegistry('python:3.13-slim');
-            executionSandbox = await app.createSandbox(pythonImage);
+            const pythonImage = modalSandbox.client.images.fromRegistry('python:3.13-slim');
+            executionSandbox = await modalSandbox.client.sandboxes.create(modalSandbox.app, pythonImage);
             command = ['python3', '-c', code];
             shouldCleanupSandbox = true; // Clean up temporary Python sandbox
           }
@@ -615,13 +617,13 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
         const tokenSecret = config.tokenSecret || process.env.MODAL_TOKEN_SECRET!;
 
         try {
-          initializeClient({ tokenId, tokenSecret });
+          const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
           // We need to reconnect to the sandbox to snapshot it
           // Note: sandbox.snapshotFilesystem() is an instance method on the Sandbox object
           // But we only have the ID here.
           // We need to re-instantiate the sandbox object from the ID.
-          
-          const sandbox = await Sandbox.fromId(sandboxId);
+
+          const sandbox = await client.sandboxes.fromId(sandboxId);
           
           // Cast to any to access the new method if types aren't updated yet
           const image = await (sandbox as any).snapshotFilesystem();

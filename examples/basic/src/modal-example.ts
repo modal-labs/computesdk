@@ -6,6 +6,7 @@
  */
 
 import { compute } from 'computesdk';
+import { modal } from '@computesdk/modal';
 import { config } from 'dotenv';
 import { PYTHON_SNIPPETS, NODEJS_SNIPPETS } from './constants/code-snippets';
 config(); // Load environment variables from .env file
@@ -18,14 +19,11 @@ async function main() {
   }
 
   try {
-    // Gateway mode: configure compute to use Modal provider
     compute.setConfig({
-      provider: 'modal',
-      apiKey: process.env.COMPUTESDK_API_KEY || 'local',
-      modal: { 
+      provider: modal({
         tokenId: process.env.MODAL_TOKEN_ID,
-        tokenSecret: process.env.MODAL_TOKEN_SECRET 
-      }
+        tokenSecret: process.env.MODAL_TOKEN_SECRET
+      })
     });
 
     // Create sandbox - auto-detects Python runtime
@@ -47,7 +45,7 @@ async function main() {
     // Write and execute a Python script
     await sandbox.filesystem.writeFile('/tmp/script.py', PYTHON_SNIPPETS.FILE_PROCESSOR);
 
-    const scriptResult = await sandbox.runCommand('python', ['/tmp/script.py']);
+    const scriptResult = await sandbox.runCommand('python /tmp/script.py');
     console.log('Script output:', scriptResult.stdout);
 
     // Create directory and list files

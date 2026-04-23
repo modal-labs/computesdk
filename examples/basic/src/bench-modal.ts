@@ -66,13 +66,17 @@ async function main() {
     try {
       sandbox = await compute.sandbox.create();
       const result = await sandbox.runCommand('echo hello');
+      if (result.exitCode !== 0) {
+        throw new Error(`command exited with code ${result.exitCode}: ${result.stderr.trim() || '(no stderr)'}`);
+      }
       const stdout = result.stdout.trim();
       const totalMs = Date.now() - t0;
 
       samples.push(totalMs);
       console.log(`${fmt(totalMs)} stdout="${stdout}"`);
     } catch (err) {
-      console.log(`FAILED — ${err instanceof Error ? err.message : String(err)}`);
+      const elapsedMs = Date.now() - t0;
+      console.log(`FAILED (${fmt(elapsedMs)}) — ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       if (sandbox) {
         try { await sandbox.destroy(); } catch { /* ignore cleanup errors */ }
@@ -97,4 +101,7 @@ async function main() {
   console.log(`  ${pad('stddev')}  ${fmt(s.stddev)}\n`);
 }
 
-main();
+main().catch((err) => {
+  console.error('Unexpected error:', err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});

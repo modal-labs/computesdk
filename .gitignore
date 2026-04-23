@@ -2,6 +2,9 @@
 node_modules/
 .pnpm-store/
 
+# Local modal-client checkout (linked via pnpm override for dev)
+/modal-client/
+
 # Build outputs
 dist/
 build/

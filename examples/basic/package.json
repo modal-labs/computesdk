@@ -12,7 +12,8 @@
     "blaxel": "tsx src/blaxel-example.ts",
     "runloop": "tsx src/runloop-example.ts",
     "docker": "tsx src/docker-example.ts",
-    "launch": "tsx src/launch-example.ts"
+    "launch": "tsx src/launch-example.ts",
+    "bench-modal": "tsx src/bench-modal.ts"
   },
   "dependencies": {
     "@computesdk/vercel": "workspace:*",

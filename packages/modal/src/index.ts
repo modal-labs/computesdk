@@ -44,6 +44,16 @@ interface ModalSandbox {
 }
 
 /**
+ * Internal config — extends ModalConfig with resources initialised once at
+ * factory time so they are not recreated on every sandbox operation.
+ */
+interface ModalInternalConfig extends ModalConfig {
+  _client: any;
+  _appPromise: Promise<any>;
+  _defaultImage: any;
+}
+
+/**
  * Detect runtime from code content
  */
 function detectRuntime(code: string): Runtime {
@@ -78,30 +88,19 @@ function detectRuntime(code: string): Runtime {
 /**
  * Create a Modal provider instance using the factory pattern
  */
-export const modal = defineProvider<ModalSandbox, ModalConfig>({
+const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
   name: 'modal',
   methods: {
     sandbox: {
       // Collection operations (map to compute.sandbox.*)
-      create: async (config: ModalConfig, options?: CreateSandboxOptions) => {
-        // Validate API credentials
-        const tokenId = config.tokenId || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_ID) || '';
-        const tokenSecret = config.tokenSecret || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_SECRET) || '';
-
-        if (!tokenId || !tokenSecret) {
-          throw new Error(
-            `Missing Modal API credentials. Provide 'tokenId' and 'tokenSecret' in config or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET environment variables. Get your credentials from https://modal.com/`
-          );
-        }
-
+      create: async (config: ModalInternalConfig, options?: CreateSandboxOptions) => {
         try {
-          const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
+          const client = config._client;
 
           let sandbox: any;
           let sandboxId: string;
 
-          // Create new Modal sandbox
-          const app = await client.apps.fromName('computesdk-modal', { createIfMissing: true });
+          const app = await config._appPromise;
 
             // Destructure known ComputeSDK fields, collect the rest for passthrough
             const {
@@ -133,8 +132,7 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
                 image = client.images.fromRegistry(sourceId);
               }
             } else {
-              // Default to Node.js (more appropriate for a Node.js SDK)
-              image = client.images.fromRegistry('node:20');
+              image = config._defaultImage;
             }
             
             // Configure sandbox options
@@ -199,11 +197,11 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
         }
       },
 
-      getById: async (config: ModalConfig, sandboxId: string) => {
+      getById: async (config: ModalInternalConfig, sandboxId: string) => {
         try {
-          const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment });
+          const client = config._client;
           const sandbox = await client.sandboxes.fromId(sandboxId);
-          const app = await client.apps.fromName('computesdk-modal', { createIfMissing: true });
+          const app = await config._appPromise;
 
           const modalSandbox: ModalSandbox = {
             sandbox,
@@ -228,9 +226,9 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
         );
       },
 
-      destroy: async (config: ModalConfig, sandboxId: string) => {
+      destroy: async (config: ModalInternalConfig, sandboxId: string) => {
         try {
-          const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment });
+          const client = config._client;
           const sandbox = await client.sandboxes.fromId(sandboxId);
           if (sandbox && typeof sandbox.terminate === 'function') {
             await sandbox.terminate();
@@ -343,7 +341,6 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
             stderr: 'pipe'
           });
 
-          // Use working stream reading pattern from debug
           const [stdout, stderr] = await Promise.all([
             process.stdout.readText(),
             process.stderr.readText()
@@ -612,12 +609,9 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
     },
 
     snapshot: {
-      create: async (config: ModalConfig, sandboxId: string, options?: { name?: string }) => {
-        const tokenId = config.tokenId || process.env.MODAL_TOKEN_ID!;
-        const tokenSecret = config.tokenSecret || process.env.MODAL_TOKEN_SECRET!;
-
+      create: async (config: ModalInternalConfig, sandboxId: string, options?: { name?: string }) => {
         try {
-          const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
+          const client = config._client;
           // We need to reconnect to the sandbox to snapshot it
           // Note: sandbox.snapshotFilesystem() is an instance method on the Sandbox object
           // But we only have the ID here.
@@ -652,3 +646,31 @@ export const modal = defineProvider<ModalSandbox, ModalConfig>({
     }
   }
 });
+
+/**
+ * Create a Modal provider instance.
+ *
+ * Validates credentials and initialises the Modal client, app, and default
+ * image once at call time rather than on every sandbox operation.
+ */
+export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
+  const tokenId = config.tokenId || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_ID) || '';
+  const tokenSecret = config.tokenSecret || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_SECRET) || '';
+
+  if (!tokenId || !tokenSecret) {
+    throw new Error(
+      `Missing Modal API credentials. Provide 'tokenId' and 'tokenSecret' in config or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET environment variables. Get your credentials from https://modal.com/`
+    );
+  }
+
+  const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
+
+  return _modal({
+    ...config,
+    tokenId,
+    tokenSecret,
+    _client: client,
+    _appPromise: client.apps.fromName('computesdk-modal', { createIfMissing: true }),
+    _defaultImage: client.images.fromRegistry('node:20'),
+  });
+}

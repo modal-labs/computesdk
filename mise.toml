@@ -14,21 +14,56 @@ sources = [
 outputs = ["node_modules/.modules.yaml"]
 run = "pnpm install"
 
-[tasks.build-modal-client]
-description = "Build local modal-client/js checkout (cached on source changes)"
+[tasks.clone-modal-client]
+description = "Clone modal-labs/modal-client into ./modal-client (idempotent)"
+hide = true
+run = """
+if [ ! -d modal-client ]; then
+  git clone git@github.com:modal-labs/modal-client.git modal-client
+else
+  echo "modal-client already cloned"
+fi
+"""
+
+[tasks.add-modal-labs-remote]
+description = "Ensure the modal-labs git remote is configured (idempotent)"
+hide = true
+run = """
+if ! git remote get-url modal-labs >/dev/null 2>&1; then
+  git remote add modal-labs git@github.com:modal-labs/computesdk.git
+  echo "added modal-labs remote"
+else
+  echo "modal-labs remote already configured"
+fi
+"""
+
+[tasks.install-modal-client]
+description = "Install modal-client/js npm dependencies (cached)"
+depends = ["clone-modal-client"]
 dir = "{{config_root}}/modal-client/js"
 sources = [
-  "modal-client/js/src/**/*",
-  "modal-client/js/package.json",
-  "modal-client/js/tsup.config.ts",
-  "modal-client/js/tsconfig.json",
+  "package.json",
+  "package-lock.json",
 ]
-outputs = ["modal-client/js/dist/**/*"]
+outputs = ["node_modules/.package-lock.json"]
+run = "npm install"
+
+[tasks.build-modal-client]
+description = "Build local modal-client/js checkout (cached on source changes)"
+depends = ["install-modal-client"]
+dir = "{{config_root}}/modal-client/js"
+sources = [
+  "src/**/*",
+  "package.json",
+  "tsup.config.ts",
+  "tsconfig.json",
+]
+outputs = ["dist/**/*"]
 run = "npm run build"
 
 [tasks.build-modal]
 description = "Build the @computesdk/modal package (cached on source changes)"
-depends = ["build-modal-client"]
+depends = ["install", "build-modal-client"]
 sources = [
   "packages/modal/src/**/*",
   "packages/modal/package.json",
@@ -43,3 +78,13 @@ description = "Run the modal example from examples/basic"
 depends = ["build-modal"]
 env = { NODE_OPTIONS = "--enable-source-maps" }
 run = "pnpm --filter @computesdk/example-basic run modal"
+
+[tasks.bootstrap]
+description = "One-shot setup for modal dev: clone, install, build (idempotent)"
+depends = ["add-modal-labs-remote", "build-modal"]
+run = """
+echo ""
+echo "Bootstrap complete. Next steps:"
+echo "  1. Set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET (see examples/basic/.env.example)"
+echo "  2. Run:  mise run modal-example"
+"""

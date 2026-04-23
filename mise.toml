@@ -71,7 +71,7 @@ sources = [
   "packages/modal/tsconfig.json",
 ]
 outputs = ["packages/modal/dist/**/*"]
-run = "pnpm --filter @computesdk/modal run build"
+run = "pnpm --filter '@computesdk/modal...' run build"
 
 [tasks.modal-example]
 description = "Run the modal example from examples/basic"

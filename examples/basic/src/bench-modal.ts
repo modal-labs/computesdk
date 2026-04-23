@@ -2,7 +2,7 @@
  * Benchmark Modal sandbox time to interactivity (create + first command).
  *
  * Usage:
- *   mise exec -- pnpm tsx scripts/bench-modal.ts [trials]
+ *   mise exec -- pnpm tsx scripts/bench-modal.ts [trials] [label]
  *
  * Requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET in environment or .env file.
  */
@@ -10,10 +10,14 @@
 import { compute } from 'computesdk';
 import { modal } from '@computesdk/modal';
 import { config } from 'dotenv';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 config();
 
 const TRIALS = parseInt(process.argv[2] ?? '5', 10);
+const LABEL = process.argv[3] ?? 'run';
 
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 1) return sorted[0];
@@ -57,26 +61,29 @@ async function main() {
 
   console.log(`\nModal sandbox creation benchmark — ${TRIALS} trial(s)\n`);
 
-  const samples: number[] = [];
+  type Sample = { index: number; durationMs: number; exitCode: number | null };
+  const samples: Sample[] = [];
 
   for (let i = 1; i <= TRIALS; i++) {
     process.stdout.write(`  Trial ${i}/${TRIALS} … `);
     const t0 = Date.now();
     let sandbox: any;
+    let exitCode: number | null = null;
     try {
       sandbox = await compute.sandbox.create();
       const result = await sandbox.runCommand('echo hello');
+      exitCode = result.exitCode;
       if (result.exitCode !== 0) {
         throw new Error(`command exited with code ${result.exitCode}: ${result.stderr.trim() || '(no stderr)'}`);
       }
       const stdout = result.stdout.trim();
-      const totalMs = Date.now() - t0;
-
-      samples.push(totalMs);
-      console.log(`${fmt(totalMs)} stdout="${stdout}"`);
+      const durationMs = Date.now() - t0;
+      samples.push({ index: i, durationMs, exitCode });
+      console.log(`${fmt(durationMs)} stdout="${stdout}"`);
     } catch (err) {
-      const elapsedMs = Date.now() - t0;
-      console.log(`FAILED (${fmt(elapsedMs)}) — ${err instanceof Error ? err.message : String(err)}`);
+      const durationMs = Date.now() - t0;
+      samples.push({ index: i, durationMs, exitCode });
+      console.log(`FAILED (${fmt(durationMs)}) — ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       if (sandbox) {
         try { await sandbox.destroy(); } catch { /* ignore cleanup errors */ }
@@ -84,15 +91,23 @@ async function main() {
     }
   }
 
-  if (samples.length === 0) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'bench-results');
+  mkdirSync(outDir, { recursive: true });
+  const outFile = join(outDir, `${timestamp}-${LABEL}.json`);
+  writeFileSync(outFile, JSON.stringify(samples, null, 2));
+  console.log(`\n  Results saved to ${outFile}`);
+
+  const successful = samples.filter((s) => s.exitCode === 0).map((s) => s.durationMs);
+  if (successful.length === 0) {
     console.error('\nAll trials failed — no stats to report.\n');
     process.exit(1);
   }
 
-  const s = stats(samples);
+  const s = stats(successful);
   const pad = (label: string) => label.padEnd(8);
 
-  console.log(`\n  ${pad('trials')}  ${samples.length} / ${TRIALS}`);
+  console.log(`\n  ${pad('trials')}  ${successful.length} / ${TRIALS}`);
   console.log(`  ${pad('min')}     ${fmt(s.min)}`);
   console.log(`  ${pad('max')}     ${fmt(s.max)}`);
   console.log(`  ${pad('mean')}    ${fmt(s.mean)}`);

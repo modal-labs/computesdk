@@ -31,6 +31,10 @@ export interface ModalConfig {
   environment?: string;
   /** Ports to expose */
   ports?: number[];
+  /** When true, app lookup and image resolution happen on each sandbox.create() call instead of once at factory time */
+  lazyInit?: boolean;
+  /** When true, logs a warning to stderr for every gRPC request made to Modal */
+  logRequests?: boolean;
 }
 
 /**
@@ -51,6 +55,7 @@ interface ModalInternalConfig extends ModalConfig {
   _client: any;
   _appPromise: Promise<any>;
   _defaultImage: any;
+  _grpcMiddleware: any[];
 }
 
 /**
@@ -95,12 +100,16 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
       // Collection operations (map to compute.sandbox.*)
       create: async (config: ModalInternalConfig, options?: CreateSandboxOptions) => {
         try {
-          const client = config._client;
+          const client = config.lazyInit
+            ? new ModalClient({ tokenId: config.tokenId!, tokenSecret: config.tokenSecret!, environment: config.environment, grpcMiddleware: config._grpcMiddleware })
+            : config._client;
 
           let sandbox: any;
           let sandboxId: string;
 
-          const app = await config._appPromise;
+          const app = config.lazyInit
+            ? await client.apps.fromName('computesdk-modal', { createIfMissing: true })
+            : await config._appPromise;
 
             // Destructure known ComputeSDK fields, collect the rest for passthrough
             const {
@@ -119,7 +128,7 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
               ports: optPorts,
               ...providerOptions
             } = options || {};
-            
+
             let image;
             // Modal supports snapshotId and templateId (both map to image)
             const sourceId = snapshotId || templateId;
@@ -132,7 +141,9 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
                 image = client.images.fromRegistry(sourceId);
               }
             } else {
-              image = config._defaultImage;
+              image = config.lazyInit
+                ? client.images.fromRegistry('node:20')
+                : config._defaultImage;
             }
             
             // Configure sandbox options
@@ -663,7 +674,18 @@ export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
     );
   }
 
-  const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
+  const grpcMiddleware = config.logRequests ? [
+    async function* requestLogger(call: any, options: any) {
+      const t0 = Date.now();
+      try {
+        return yield* call.next(call.request, options);
+      } finally {
+        process.stderr.write(`[modal] ${call.method.path.split('/').pop()} ${Date.now() - t0}ms\n`);
+      }
+    }
+  ] : [];
+
+  const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment, grpcMiddleware });
 
   return _modal({
     ...config,
@@ -672,5 +694,6 @@ export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
     _client: client,
     _appPromise: client.apps.fromName('computesdk-modal', { createIfMissing: true }),
     _defaultImage: client.images.fromRegistry('node:20'),
+    _grpcMiddleware: grpcMiddleware,
   });
 }

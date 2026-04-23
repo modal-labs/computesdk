@@ -110,3 +110,4 @@ CONCEPTS.md
 workbench-cheatsheet.md
 # Superset
 .superset/
+*.json

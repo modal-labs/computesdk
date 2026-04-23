@@ -80,6 +80,12 @@ depends = ["build-modal"]
 env = { NODE_OPTIONS = "--enable-source-maps" }
 run = "pnpm --filter @computesdk/example-basic run modal"
 
+[tasks.bench-modal]
+description = "Run the Modal sandbox creation benchmark from examples/basic"
+depends = ["build-modal"]
+env = { NODE_OPTIONS = "--enable-source-maps" }
+run = "pnpm --filter @computesdk/example-basic run bench-modal"
+
 [tasks.bootstrap]
 description = "One-shot setup for modal dev: clone, install, build (idempotent)"
 depends = ["add-modal-labs-remote", "build-modal"]

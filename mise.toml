@@ -1,0 +1,45 @@
+[tools]
+node = "24"
+pnpm = "9"
+
+[tasks.install]
+description = "Install workspace dependencies with pnpm (cached on manifest changes)"
+sources = [
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "packages/*/package.json",
+  "examples/*/package.json",
+]
+outputs = ["node_modules/.modules.yaml"]
+run = "pnpm install"
+
+[tasks.build-modal-client]
+description = "Build local modal-client/js checkout (cached on source changes)"
+dir = "{{config_root}}/modal-client/js"
+sources = [
+  "modal-client/js/src/**/*",
+  "modal-client/js/package.json",
+  "modal-client/js/tsup.config.ts",
+  "modal-client/js/tsconfig.json",
+]
+outputs = ["modal-client/js/dist/**/*"]
+run = "npm run build"
+
+[tasks.build-modal]
+description = "Build the @computesdk/modal package (cached on source changes)"
+depends = ["build-modal-client"]
+sources = [
+  "packages/modal/src/**/*",
+  "packages/modal/package.json",
+  "packages/modal/tsup.config.ts",
+  "packages/modal/tsconfig.json",
+]
+outputs = ["packages/modal/dist/**/*"]
+run = "pnpm --filter @computesdk/modal run build"
+
+[tasks.modal-example]
+description = "Run the modal example from examples/basic"
+depends = ["build-modal"]
+env = { NODE_OPTIONS = "--enable-source-maps" }
+run = "pnpm --filter @computesdk/example-basic run modal"

@@ -1,5 +1,6 @@
 [tools]
 node = "24"
+npm = "10"
 pnpm = "9"
 
 [tasks.install]

@@ -665,15 +665,6 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
  * image once at call time rather than on every sandbox operation.
  */
 export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
-  const tokenId = config.tokenId || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_ID) || '';
-  const tokenSecret = config.tokenSecret || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_SECRET) || '';
-
-  if (!tokenId || !tokenSecret) {
-    throw new Error(
-      `Missing Modal API credentials. Provide 'tokenId' and 'tokenSecret' in config or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET environment variables. Get your credentials from https://modal.com/`
-    );
-  }
-
   const grpcMiddleware = config.logRequests ? [
     async function* requestLogger(call: any, options: any) {
       const t0 = Date.now();
@@ -685,12 +676,10 @@ export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
     }
   ] : [];
 
-  const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment, grpcMiddleware });
+  const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment, grpcMiddleware });
 
   return _modal({
     ...config,
-    tokenId,
-    tokenSecret,
     _client: client,
     _appPromise: client.apps.fromName('computesdk-modal', { createIfMissing: true }),
     _defaultImage: client.images.fromRegistry('node:20'),

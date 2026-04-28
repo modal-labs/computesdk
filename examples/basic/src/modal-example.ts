@@ -7,23 +7,12 @@
 
 import { compute } from 'computesdk';
 import { modal } from '@computesdk/modal';
-import { config } from 'dotenv';
 import { PYTHON_SNIPPETS, NODEJS_SNIPPETS } from './constants/code-snippets';
-config(); // Load environment variables from .env file
 
 async function main() {
-  if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
-    console.error('Please set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET environment variables');
-    console.error('Run: modal token new');
-    process.exit(1);
-  }
-
   try {
     compute.setConfig({
-      provider: modal({
-        tokenId: process.env.MODAL_TOKEN_ID,
-        tokenSecret: process.env.MODAL_TOKEN_SECRET
-      })
+      provider: modal()
     });
 
     // Create sandbox - auto-detects Python runtime

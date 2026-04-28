@@ -12,8 +12,8 @@ import { defineProvider, escapeShellArg } from '@computesdk/provider';
 
 import type { Runtime, CodeResult, CommandResult, SandboxInfo, CreateSandboxOptions, FileEntry, RunCommandOptions } from '@computesdk/provider';
 
-// Import Modal SDK
 import { ModalClient } from 'modal';
+import type { Sandbox, App, Image, SandboxCreateParams } from 'modal';
 
 /**
  * Modal-specific configuration options
@@ -37,10 +37,10 @@ export interface ModalConfig {
  * Modal sandbox interface - wraps Modal's Sandbox class
  */
 interface ModalSandbox {
-  sandbox: any; // Modal Sandbox instance (using any due to alpha SDK)
+  sandbox: Sandbox;
   sandboxId: string;
-  client: any; // ModalClient instance - carried through so instance methods use the same credentials/environment
-  app: any;    // Modal App instance
+  client: ModalClient;
+  app: App;
 }
 
 /**
@@ -48,9 +48,9 @@ interface ModalSandbox {
  * factory time so they are not recreated on every sandbox operation.
  */
 interface ModalInternalConfig extends ModalConfig {
-  _client: any;
-  _appPromise: Promise<any>;
-  _defaultImage: any;
+  _client: ModalClient;
+  _appPromise: Promise<App>;
+  _defaultImage: Image;
 }
 
 /**
@@ -97,7 +97,7 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
         try {
           const client = config._client;
 
-          let sandbox: any;
+          let sandbox: Sandbox;
           let sandboxId: string;
 
           const app = await config._appPromise;
@@ -137,8 +137,8 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
 
             // Configure sandbox options
             // Modal SDK uses: env, timeoutMs, name, workdir, unencryptedPorts, gpu, cpu, etc.
-            const sandboxOptions: any = {
-              ...providerOptions, // Spread provider-specific options (e.g., gpu, cpu, memoryMiB, workdir, secrets, volumes)
+            const sandboxOptions: SandboxCreateParams = {
+              ...(providerOptions as Partial<SandboxCreateParams>),
             };
 
             // Configure ports if provided (using unencrypted ports by default)
@@ -422,21 +422,10 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
       filesystem: {
         readFile: async (modalSandbox: ModalSandbox, path: string): Promise<string> => {
           try {
-            // Use Modal's file open API to read files
             const file = await modalSandbox.sandbox.open(path);
-
-            // Read the entire file content
-            let content = '';
-            if (file && typeof file.read === 'function') {
-              const data = await file.read();
-              content = typeof data === 'string' ? data : new TextDecoder().decode(data);
-            }
-
-            // Close the file if it has a close method
-            if (file && typeof file.close === 'function') {
-              await file.close();
-            }
-
+            const data = await file.read();
+            const content = new TextDecoder().decode(data);
+            await file.close();
             return content;
           } catch (error) {
             // Fallback to using cat command with working stream pattern
@@ -465,40 +454,11 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
         },
 
         writeFile: async (modalSandbox: ModalSandbox, path: string, content: string): Promise<void> => {
+          const file = await modalSandbox.sandbox.open(path, 'w');
           try {
-            // Use Modal's file open API to write files
-            const file = await modalSandbox.sandbox.open(path);
-
-            // Write content to the file
-            if (file && typeof file.write === 'function') {
-              await file.write(content);
-            }
-
-            // Close the file if it has a close method
-            if (file && typeof file.close === 'function') {
-              await file.close();
-            }
-          } catch (error) {
-            // Fallback to using shell command with proper escaping
-            try {
-              const process = await modalSandbox.sandbox.exec(['sh', '-c', `printf '%s' "${content.replace(/"/g, '\\"')}" > "${path}"`], {
-                stdout: 'pipe',
-                stderr: 'pipe'
-              });
-
-              const [, stderr] = await Promise.all([
-                process.stdout.readText(),
-                process.stderr.readText()
-              ]);
-
-              const exitCode = await process.wait();
-
-              if (exitCode !== 0) {
-                throw new Error(`write failed: ${stderr}`);
-              }
-            } catch (fallbackError) {
-              throw new Error(`Failed to write file ${path}: ${error instanceof Error ? error.message : String(error)}`);
-            }
+            await file.write(new TextEncoder().encode(content));
+          } finally {
+            await file.close();
           }
         },
 
@@ -617,14 +577,10 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
           // We need to re-instantiate the sandbox object from the ID.
 
           const sandbox = await client.sandboxes.fromId(sandboxId);
+          const image = await sandbox.snapshotFilesystem();
 
-          // Cast to any to access the new method if types aren't updated yet
-          const image = await (sandbox as any).snapshotFilesystem();
-
-          // Return the image object. The user can use this image to create new sandboxes.
-          // We wrap it in a structure that looks like a snapshot
           return {
-            id: (image as any).objectId || `img-${Date.now()}`, // Best effort ID
+            id: image.imageId,
             image: image,
             provider: 'modal',
             createdAt: new Date()
@@ -653,21 +609,10 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
  * image once at call time rather than on every sandbox operation.
  */
 export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
-  const tokenId = config.tokenId || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_ID) || '';
-  const tokenSecret = config.tokenSecret || (typeof process !== 'undefined' && process.env?.MODAL_TOKEN_SECRET) || '';
-
-  if (!tokenId || !tokenSecret) {
-    throw new Error(
-      `Missing Modal API credentials. Provide 'tokenId' and 'tokenSecret' in config or set MODAL_TOKEN_ID and MODAL_TOKEN_SECRET environment variables. Get your credentials from https://modal.com/`
-    );
-  }
-
-  const client = new ModalClient({ tokenId, tokenSecret, environment: config.environment });
+  const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment });
 
   return _modal({
     ...config,
-    tokenId,
-    tokenSecret,
     _client: client,
     _appPromise: client.apps.fromName('computesdk-modal', { createIfMissing: true }),
     _defaultImage: client.images.fromRegistry('node:20'),

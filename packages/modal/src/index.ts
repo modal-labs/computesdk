@@ -106,24 +106,19 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
               metadata: _metadata,
               templateId,
               snapshotId,
+              imageId,
               sandboxId: _sandboxId,
               namespace: _namespace,
               directory: _directory,
               ports: optPorts,
               ...providerOptions
             } = options || {};
-            
+
             let image: Image;
-            // Modal supports snapshotId and templateId (both map to image)
-            const sourceId = snapshotId || templateId;
+            // imageId is the Modal-native field; templateId and snapshotId are ComputeSDK aliases
+            const sourceId = imageId ?? snapshotId ?? templateId;
             if (sourceId) {
-              // Create from snapshot/template
-              try {
-                image = await client.images.fromId(sourceId);
-              } catch (e) {
-                // Fallback: try to treat it as a registry image
-                image = client.images.fromRegistry(sourceId);
-              }
+              image = await client.images.fromId(sourceId);
             } else {
               image = resolveImage(client, _runtime, config.runtime);
             }
@@ -518,20 +513,36 @@ const _modal = defineProvider<ModalSandbox, ModalInternalConfig>({
   }
 });
 
+export type ModalProvider = ReturnType<typeof _modal> & {
+  buildImage(tag: string): Promise<string>;
+};
+
 /**
  * Create a Modal provider instance.
  */
-export function modal(config: ModalConfig = {}): ReturnType<typeof _modal> {
+export function modal(config: ModalConfig = {}): ModalProvider {
   const runtime = config.runtime ?? DEFAULT_RUNTIME;
   const appName = config.appName ?? DEFAULT_APP_NAME;
   const client = new ModalClient({ tokenId: config.tokenId, tokenSecret: config.tokenSecret, environment: config.environment });
   const appPromise = client.apps.fromName(appName, { createIfMissing: true });  // avoids recreating every method call
 
-  return _modal({
+  const provider = _modal({
     ...config,
     runtime,
     appName,
     _client: client,
     _appPromise: appPromise,
   });
+
+  return {
+    ...provider,
+    /** Build a Docker registry image on Modal and return its imageId.
+     *  Pass the returned id as `imageId` in `sandbox.create()` to reuse the image without rebuilding. */
+    buildImage: async (tag: string): Promise<string> => {
+      const app = await appPromise;
+      const image = client.images.fromRegistry(tag);
+      const built = await image.build(app);
+      return built.imageId;
+    },
+  };
 }

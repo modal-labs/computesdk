@@ -11,9 +11,16 @@ import { PYTHON_SNIPPETS, NODEJS_SNIPPETS } from './constants/code-snippets';
 
 async function main() {
   try {
-    compute.setConfig({
-      provider: modal()
-    });
+    const provider = modal();
+    compute.setConfig({ provider });
+
+    // Build a custom image and reuse its imageId for future sandbox.create() calls
+    const imageId = await provider.buildImage('python:3.12-slim');
+    const customSandbox = await compute.sandbox.create({ imageId });
+    console.log('Custom image sandbox:', customSandbox.sandboxId);
+    const versionResult = await customSandbox.runCommand('python3 --version');
+    console.log('Python version:', versionResult.stdout);
+    await customSandbox.destroy();
 
     // Create a Python sandbox
     console.log('Creating Modal sandbox for Python...');
